@@ -1,0 +1,4 @@
+{
+  "iou_threshold": 0.3,
+  "max_gap": 8
+}

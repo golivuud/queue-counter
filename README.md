@@ -1,6 +1,6 @@
 # Подсчёт посетителей и оценка очередей
 
-Учебная НИР. В `01.docx` постановка задачи, в `02.ipynb` анализ данных, в `03.ipynb` базовое решение и проверка. `baseline.py` обрабатывает видео.
+Учебная НИР. В `01.docx` постановка задачи, в `02.ipynb` анализ данных, в `03.ipynb` базовое решение и проверка, в `04.ipynb` сравнение вариантов трекера. `baseline.py` обрабатывает видео.
 
 ## Запуск в WSL
 
@@ -11,6 +11,8 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 .venv/bin/python baseline.py video.mp4 --output queue.jsonl
 ```
+
+Настройки, выбранные в 04, можно загрузить параметром `--tracker-config experiment_results/tracker.json`.
 
 Результат записывается в `queue.jsonl`. Зоны задаются параметрами `--waiting x1 y1 x2 y2` и `--service x1 y1 x2 y2` в пикселях. Если известна площадь зоны ожидания, передайте её в м² через `--area`.
 

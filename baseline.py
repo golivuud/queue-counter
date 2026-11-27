@@ -7,27 +7,40 @@ import numpy as np
 from scipy.optimize import linear_sum_assignment
 
 
+def box_iou(left, right):
+    left = np.asarray(left, dtype=float).reshape(-1, 4)
+    right = np.asarray(right, dtype=float).reshape(-1, 4)
+    start = np.maximum(left[:, None, :2], right[None, :, :2])
+    end = np.minimum((left[:, :2] + left[:, 2:])[:, None],
+                     (right[:, :2] + right[:, 2:])[None, :])
+    intersection = np.maximum(end - start, 0).prod(axis=2)
+    union = left[:, 2:].prod(axis=1)[:, None] + right[:, 2:].prod(axis=1) - intersection
+    return np.divide(intersection, union, out=np.zeros_like(intersection), where=union > 0)
+
+
 class Tracker:
-    def __init__(self):
+    def __init__(self, iou_threshold=0.3, max_gap=3):
+        if not 0 < iou_threshold <= 1:
+            raise ValueError("Порог IoU должен быть больше 0 и не больше 1")
+        if not isinstance(max_gap, int) or max_gap < 0:
+            raise ValueError("Допустимый пропуск должен быть целым неотрицательным числом")
+        self.iou_threshold = iou_threshold
+        self.max_gap = max_gap
         self.active = {}
         self.next_id = 1
 
     def update(self, frame, boxes):
         boxes = np.asarray(boxes, dtype=float).reshape(-1, 4)
         self.active = {key: track for key, track in self.active.items()
-                       if frame - track[0] <= 4}
+                       if frame - track[0] <= self.max_gap + 1}
         ids = list(self.active)
         assigned = {}
         if ids and len(boxes):
             old = np.array([self.active[key][1] for key in ids])
-            start = np.maximum(old[:, None, :2], boxes[None, :, :2])
-            end = np.minimum((old[:, :2] + old[:, 2:])[:, None],
-                             (boxes[:, :2] + boxes[:, 2:])[None, :])
-            intersection = np.maximum(end - start, 0).prod(axis=2)
-            union = old[:, 2:].prod(axis=1)[:, None] + boxes[:, 2:].prod(axis=1)
-            iou = intersection / (union - intersection)
-            rows, cols = linear_sum_assignment(np.where(iou >= .3, iou, 0), maximize=True)
-            assigned = {col: ids[row] for row, col in zip(rows, cols) if iou[row, col] >= .3}
+            iou = box_iou(old, boxes)
+            eligible = iou >= self.iou_threshold
+            rows, cols = linear_sum_assignment(np.where(eligible, iou, 0), maximize=True)
+            assigned = {col: ids[row] for row, col in zip(rows, cols) if eligible[row, col]}
 
         tracks = []
         for index, box in enumerate(boxes):
@@ -74,8 +87,9 @@ class Queue:
         }
 
 
-def analyze(video, waiting, service, area, output):
-    tracker = Tracker()
+def analyze(video, waiting, service, area, output, *, tracker=None):
+    if tracker is None:
+        tracker = Tracker()
     hog = cv2.HOGDescriptor()
     hog.setSVMDetector(cv2.HOGDescriptor_getDefaultPeopleDetector())
     capture = cv2.VideoCapture(video)
@@ -113,6 +127,7 @@ if __name__ == "__main__":
     parser.add_argument("--service", type=int, nargs=4, default=[300, 80, 400, 360])
     parser.add_argument("--area", type=float)
     parser.add_argument("--output", default="queue.jsonl")
+    parser.add_argument("--tracker-config", help="JSON с порогом IoU и допустимым пропуском")
     args = parser.parse_args()
     for x1, y1, x2, y2 in (args.waiting, args.service):
         if min(x1, y1) < 0 or x2 <= x1 or y2 <= y1:
@@ -120,6 +135,12 @@ if __name__ == "__main__":
     if args.area is not None and (not np.isfinite(args.area) or args.area <= 0):
         parser.error("Площадь зоны должна быть положительной")
     try:
-        print(f"Обработано кадров: {analyze(args.video, args.waiting, args.service, args.area, args.output)}")
-    except (OSError, ValueError) as error:
+        tracker = None
+        if args.tracker_config:
+            with open(args.tracker_config, encoding="utf-8") as config:
+                tracker = Tracker(**json.load(config))
+        frames = analyze(args.video, args.waiting, args.service, args.area, args.output,
+                         tracker=tracker)
+        print(f"Обработано кадров: {frames}")
+    except (OSError, TypeError, ValueError) as error:
         parser.exit(1, f"{error}\n")
